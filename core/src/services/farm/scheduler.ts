@@ -4,7 +4,7 @@ export {};
  */
 
 const { CONFIG } = require('../../config/config');
-const { getPlantById, getItemById } = require('../../config/gameConfig');
+const { getPlantById, getItemById, getLandConfigById, getLandConfigByCoordinate } = require('../../config/gameConfig');
 const { isAutomationOn, getAutomation, getFertilizerBuyOrganicCount, getFertilizerBuyOrganicThresholdHours, getFertilizerBuyNormalCount, getFertilizerBuyNormalThresholdHours, getFertilizerBuyCheckIntervalMinutes } = require('../../models/store');
 const { getUserState, networkEvents } = require('../../utils/network');
 const { toNum, log, logWarn, randomDelay } = require('../../utils/utils');
@@ -33,6 +33,58 @@ function inFarmQuietHours() {
 let isCheckingFarm: boolean = false;
 let isFirstFarmCheck: boolean = true;
 let farmLoopRunning: boolean = false;
+
+/**
+ * 升级顺序：优先最高的目标等级（蓝晶 > 紫晶 > 金 ...），同等级内优先“能凑成 2x2 四块同类地”的土地。
+ * 只要还有更高一级的候选，就不会把资源花在更低一级的升级上。
+ */
+function orderUpgradableLands(landIds: number[], lands: any[]): number[] {
+    const byId = new Map<number, any>();
+    for (const land of (Array.isArray(lands) ? lands : [])) {
+        const id = toNum(land && land.id);
+        if (id) byId.set(id, land);
+    }
+    const candidates = (Array.isArray(landIds) ? landIds : [])
+        .map((id: any) => ({ id: toNum(id), level: toNum(byId.get(toNum(id))?.level) }))
+        .filter((item: { id: number; level: number }) => item.id > 0 && item.level > 0);
+    if (candidates.length === 0) return Array.isArray(landIds) ? landIds : [];
+
+    const targetLevel = Math.max(...candidates.map(item => item.level + 1));
+    const highest = candidates.filter(item => item.level + 1 === targetLevel);
+
+    const positions = new Map<number, { x: number; y: number }>();
+    for (const item of highest) {
+        const config = getLandConfigById(item.id);
+        if (config) positions.set(item.id, { x: Number(config.grid_x), y: Number(config.grid_y) });
+    }
+
+    function groupScore(landId: number): number {
+        const pos = positions.get(landId);
+        if (!pos) return 0;
+        let best = 0;
+        for (let dx = -1; dx <= 0; dx++) {
+            for (let dy = -1; dy <= 0; dy++) {
+                const members: number[] = [];
+                let complete = true;
+                for (let ox = 0; ox < 2 && complete; ox++) {
+                    for (let oy = 0; oy < 2; oy++) {
+                        const cell = getLandConfigByCoordinate(pos.x + dx + ox, pos.y + dy + oy);
+                        const cellId = toNum(cell && cell.id);
+                        if (!cellId) { complete = false; break; }
+                        members.push(cellId);
+                    }
+                }
+                if (!complete) continue;
+                const already = members.filter((id) => toNum(byId.get(id)?.level) >= targetLevel).length;
+                if (already > best) best = already;
+            }
+        }
+        return best;
+    }
+
+    highest.sort((a, b) => (groupScore(b.id) - groupScore(a.id)) || (a.id - b.id));
+    return highest.map(item => item.id);
+}
 let externalSchedulerMode: boolean = false;
 let farmLoopGeneration = 0;
 let automaticPlantPacing: any = { lastPlantAt: null, defer: true };
@@ -362,7 +414,7 @@ async function runFarmOperation(
 
         if (status.upgradable.length > 0) {
             let upgraded: number = 0;
-            for (const landId of status.upgradable) {
+            for (const landId of orderUpgradableLands(status.upgradable, lands)) {
                 try {
                     const reply = await upgradeLand(landId);
                     const newLevel = reply.land ? toNum(reply.land.level) : '?';
@@ -602,4 +654,5 @@ module.exports = {
     startFertilizerBuyCheckTimer,
     stopFertilizerBuyCheckTimer,
     checkFertilizerBuyOnce,
+    orderUpgradableLands,
 };

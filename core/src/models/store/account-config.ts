@@ -101,6 +101,7 @@ function getConfigSnapshot(accountId?: unknown): AccountConfig & { ui: typeof gl
         knownFriendGidSyncCooldownSec: cfg.knownFriendGidSyncCooldownSec,
         friendsListCacheTtlSec: cfg.friendsListCacheTtlSec,
         friendBlacklist: [...(cfg.friendBlacklist || [])],
+        stealExemptGids: [...(cfg.stealExemptGids || [])],
         plantBlacklist: [...(cfg.plantBlacklist || [])],
         stealDelaySeconds: Math.max(0, Math.min(300, Number(cfg.stealDelaySeconds) || 0)),
         plantOrderRandom: !!cfg.plantOrderRandom,
@@ -187,6 +188,10 @@ function applyConfigSnapshot(snapshot: Record<string, any> | undefined, options:
 
     if (Array.isArray(cfg.friendBlacklist)) {
         next.friendBlacklist = cfg.friendBlacklist.map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
+    }
+
+    if (Array.isArray(cfg.stealExemptGids)) {
+        next.stealExemptGids = cfg.stealExemptGids.map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
     }
 
     if (cfg.knownFriendGids !== undefined) {
@@ -419,6 +424,18 @@ function addFriendToBlacklist(accountId: unknown, gid: unknown): boolean {
     return true;
 }
 
+function getStealExemptGids(accountId?: unknown): number[] {
+    return [...(getAccountConfigSnapshot(accountId).stealExemptGids || [])];
+}
+
+function setStealExemptGids(accountId: unknown, list: unknown[]): number[] {
+    const current = getAccountConfigSnapshot(accountId);
+    const next = normalizeAccountConfig(current, sharedState.accountFallbackConfig);
+    next.stealExemptGids = Array.isArray(list) ? list.map(Number).filter(n => Number.isFinite(n) && n > 0) : [];
+    setAccountConfigSnapshot(accountId, next);
+    return [...next.stealExemptGids];
+}
+
 function getStealDelaySeconds(accountId?: unknown): number {
     return Math.max(0, Math.min(300, Number(getAccountConfigSnapshot(accountId).stealDelaySeconds) || 0));
 }
@@ -513,6 +530,8 @@ module.exports = {
     setFriendsListCacheTtlSec,
     getFriendBlacklist,
     setFriendBlacklist,
+    getStealExemptGids,
+    setStealExemptGids,
     addFriendToBlacklist,
     getStealDelaySeconds,
     getPlantOrderRandom,

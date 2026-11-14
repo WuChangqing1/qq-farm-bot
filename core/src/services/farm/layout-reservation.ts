@@ -18,6 +18,8 @@ interface SelectFutureLayoutOptions {
     registered?: PlantingLayout | null;
     /** 本轮已被其他种子占用的整组目标布局土地；与之重叠的候选布局不可选。 */
     excludeLandIds?: Iterable<number>;
+    /** landId -> 土地类型；多格作物只预留同一类型的四块地。 */
+    landTypeById?: Map<number, string>;
 }
 
 // seedId -> 已登记的目标布局。每个账号运行在独立 worker 进程内，模块级状态天然按账号隔离。
@@ -49,14 +51,14 @@ function selectFutureLayoutReservation(
         .map((id: any) => toNum(id))
         .filter((id: number) => id > 0));
     if (emptyIds.size === 0) return null;
-    if (buildPlantingLayouts([...emptyIds], size).length > 0) return null;
+    if (buildPlantingLayouts([...emptyIds], size, options.landTypeById).length > 0) return null;
 
     const excluded = new Set<number>([...(options.excludeLandIds || [])]
         .map((id: any) => toNum(id))
         .filter((id: number) => id > 0));
     const registeredKey = layoutKey(options.registered);
 
-    const candidates = buildPlantingLayouts(allEligibleLandIds, size)
+    const candidates = buildPlantingLayouts(allEligibleLandIds, size, options.landTypeById)
         .map((layout: PlantingLayout) => ({
             layout,
             reservedLandIds: layout.landIds.filter((id: number) => emptyIds.has(id)),

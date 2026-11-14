@@ -104,6 +104,7 @@ const DEFAULT_ACCOUNT_CONFIG: AccountConfig = {
     knownFriendGidSyncCooldownSec: DEFAULT_KNOWN_FRIEND_GID_SYNC_COOLDOWN_SEC,
     friendsListCacheTtlSec: DEFAULT_FRIENDS_LIST_CACHE_TTL_SEC,
     friendBlacklist: [],
+    stealExemptGids: [],
     plantBlacklist: [
         20002,
         20003,
@@ -312,6 +313,8 @@ function cloneAccountConfig(base: Partial<AccountConfig> = DEFAULT_ACCOUNT_CONFI
         knownFriendGidSyncCooldownSec,
         friendsListCacheTtlSec,
         friendBlacklist: rawBlacklist.map(Number).filter(n => Number.isFinite(n) && n > 0),
+        stealExemptGids: (Array.isArray(base.stealExemptGids) ? base.stealExemptGids : [])
+            .map(Number).filter(n => Number.isFinite(n) && n > 0),
         plantingStrategy: ALLOWED_PLANTING_STRATEGIES.includes(String(base.plantingStrategy || '') as PlantingStrategy)
             ? String(base.plantingStrategy) as PlantingStrategy
             : DEFAULT_ACCOUNT_CONFIG.plantingStrategy,
@@ -396,6 +399,10 @@ function normalizeAccountConfig(input: unknown, fallback: AccountConfig = accoun
 
     if (Array.isArray(src.friendBlacklist)) {
         cfg.friendBlacklist = src.friendBlacklist.map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
+    }
+
+    if (Array.isArray(src.stealExemptGids)) {
+        cfg.stealExemptGids = src.stealExemptGids.map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
     }
 
     if (src.knownFriendGids !== undefined) {

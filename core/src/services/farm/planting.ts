@@ -388,7 +388,7 @@ async function plantFromBagSeeds(landsToPlant: any[], landTypeById?: Map<number,
         const allowedLandIds: number[] = seed.landTypes
             ? filterLandIdsByTypes(remainingLandIds, landTypeById, seed.landTypes)
             : remainingLandIds;
-        const allLayouts: PlantingLayout[] = buildPlantingLayouts(allowedLandIds, plantSize);
+        const allLayouts: PlantingLayout[] = buildPlantingLayouts(allowedLandIds, plantSize, landTypeById);
         const layouts: PlantingLayout[] = selectNonOverlappingLayouts(allLayouts, toNum(seed.count));
         const scopeLog = seed.landTypes ? ` 限${formatFertilizerLandTypes(seed.landTypes).join('/')}=${allowedLandIds.length}` : '';
         log('种植', `背包种子 ${seed.name}(${seed.seedId}) size=${plantSize} count=${seed.count} 剩余=${remainingLandIds.length}${scopeLog} allLayouts=${allLayouts.length} selected=${layouts.length}`, {
@@ -411,6 +411,7 @@ async function plantFromBagSeeds(landsToPlant: any[], landTypeById?: Map<number,
                 ? selectFutureLayoutReservation(allowedLandIds, allEligibleLandIds, plantSize, {
                     registered: getRegisteredLayout(seed.seedId),
                     excludeLandIds: claimedLayoutLandIds,
+                    landTypeById,
                 })
                 : null;
             if (!reservation) clearRegisteredLayout(seed.seedId);
@@ -715,20 +716,18 @@ async function getLandsDetail(propagateErrors: boolean = false): Promise<{ lands
 }
 
 /**
- * 解析 landId -> 土地类型。仅在配置了土地限制时才解析，未配置的账号不额外请求土地。
+ * 解析 landId -> 土地类型。四格作物需要“四块同类型地”，因此所有账号都会解析一次；
  * 解析不出来时返回 undefined，调用方按不限制处理。
  */
-async function resolveLandTypeMapForBagSeeds(knownLands: any[]): Promise<Map<number, string> | undefined> {
-    if (Object.keys(getBagSeedLandTypes() || {}).length === 0) return undefined;
-
+async function resolveLandTypeMap(knownLands: any[]): Promise<Map<number, string> | undefined> {
     let lands: any[] = Array.isArray(knownLands) ? knownLands : [];
     if (lands.length === 0) {
         try {
             const latest = await getAllLands();
             lands = Array.isArray(latest && latest.lands) ? latest.lands : [];
         } catch (e: any) {
-            logWarn('种植', `获取土地类型失败，本轮忽略背包种子的土地限制: ${e.message}`, {
-                module: 'farm', event: '种植种子', result: 'land_type_error', strategy: 'bag_priority',
+            logWarn('种植', `获取土地类型失败，本轮忽略四格作物的同类地限制: ${e.message}`, {
+                module: 'farm', event: '种植种子', result: 'land_type_error',
             });
             return undefined;
         }
@@ -741,8 +740,8 @@ async function resolveLandTypeMapForBagSeeds(knownLands: any[]): Promise<Map<num
         landTypeById.set(landId, getLandTypeByLevel(land.level));
     }
     if (landTypeById.size === 0) {
-        logWarn('种植', '无法确认土地类型，本轮忽略背包种子的土地限制', {
-            module: 'farm', event: '种植种子', result: 'land_type_empty', strategy: 'bag_priority',
+        logWarn('种植', '无法确认土地类型，本轮忽略四格作物的同类地限制', {
+            module: 'farm', event: '种植种子', result: 'land_type_empty',
         });
     }
     return landTypeById;
@@ -792,12 +791,13 @@ async function autoPlantEmptyLands(deadLandIds: number[], emptyLandIds: number[]
     if (landsToPlant.length === 0) return { plantedLands: [] };
 
     const accountStrategy = String(getPlantingStrategy() || '').trim();
+    // 四格作物只允许四块同类型地；所有策略共用同一份 landId -> 类型映射
+    const landTypeById = await resolveLandTypeMap(latestLands);
 
     // 背包种子优先策略
     if (accountStrategy === 'bag_priority') {
         let bagResult: any;
         try {
-            const landTypeById = await resolveLandTypeMapForBagSeeds(latestLands);
             const allUnlockedLandIds = latestLands
                 .filter((land: any) => !!(land && land.unlocked))
                 .map((land: any) => toNum(land.id))
@@ -829,7 +829,7 @@ async function autoPlantEmptyLands(deadLandIds: number[], emptyLandIds: number[]
                 strategy: fallbackStrategy,
                 remainingCount: bagResult.remainingLandIds.length,
             });
-            const shopResult = await plantFromShop(bagResult.remainingLandIds, state, fallbackStrategy, { ...options, pacing });
+            const shopResult = await plantFromShop(bagResult.remainingLandIds, state, fallbackStrategy, { ...options, pacing, landTypeById });
             plantedLands.push(...(shopResult.plantedLands || []));
         }
 
@@ -844,14 +844,14 @@ async function autoPlantEmptyLands(deadLandIds: number[], emptyLandIds: number[]
     }
 
     // 其他策略：从商店购买种植
-    const shopResult = await plantFromShop(landsToPlant, state, undefined, { ...options, pacing });
+    const shopResult = await plantFromShop(landsToPlant, state, undefined, { ...options, pacing, landTypeById });
     if (shopResult.plantedLands && shopResult.plantedLands.length > 0) {
         await runFertilizerByConfig(shopResult.plantedLands, options);
     }
     return shopResult;
 }
 
-async function plantFromShop(landsToPlant: number[], state: any, overrideStrategy?: string, options: { propagateErrors?: boolean; pacing?: PlantingPacing } = {}): Promise<any> {
+async function plantFromShop(landsToPlant: number[], state: any, overrideStrategy?: string, options: { propagateErrors?: boolean; pacing?: PlantingPacing; landTypeById?: Map<number, string> } = {}): Promise<any> {
     const pacing = options.pacing || { lastPlantAt: null };
     if (pacing.deferred || (isSlicedPlanting(pacing) && getRemainingPlantDelayMs(pacing) > 0)) {
         pacing.deferred = true;
@@ -868,7 +868,7 @@ async function plantFromShop(landsToPlant: number[], state: any, overrideStrateg
         const seedId = pacing.shopSeed.seedId;
         const bag = await getBagSeeds();
         const count = Math.min(pacing.shopSeed.remaining, toNum(bag.find((seed: any) => toNum(seed.seedId) === seedId)?.count));
-        const layouts = selectNonOverlappingLayouts(buildPlantingLayouts(remainingLandIds, getPlantSizeBySeedId(seedId)), count);
+        const layouts = selectNonOverlappingLayouts(buildPlantingLayouts(remainingLandIds, getPlantSizeBySeedId(seedId), options.landTypeById), count);
         if (layouts.length > 0) {
             const result = await plantSeeds(seedId, layouts.map((layout: PlantingLayout) => layout.anchorLandId), {
                 layouts, pacing, propagateErrors: options.propagateErrors,
@@ -903,7 +903,7 @@ async function plantFromShop(landsToPlant: number[], state: any, overrideStrateg
         const plantSize = getPlantSizeBySeedId(candidate.seedId);
         const growTime = plantCfg ? getPlantGrowTime(plantCfg.id) : 0;
         const growTimeStr = growTime > 0 ? ` 生长${formatGrowTime(growTime)}` : '';
-        const allLayouts: PlantingLayout[] = buildPlantingLayouts(remainingLandIds, plantSize);
+        const allLayouts: PlantingLayout[] = buildPlantingLayouts(remainingLandIds, plantSize, options.landTypeById);
         let layouts: PlantingLayout[] = selectNonOverlappingLayouts(allLayouts, allLayouts.length);
         if (layouts.length === 0) {
             log('种植', `${seedName} 无合法${plantSize}x${plantSize} 布局，继续下一候选`, {

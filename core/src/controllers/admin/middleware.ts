@@ -29,7 +29,10 @@ const issueToken = (): string => crypto.randomBytes(24).toString('hex');
 function createAuthRequired(ctx: AdminContext) {
     return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
         const token = String(req.headers['x-admin-token'] || '');
-        if (!token || !ctx.tokens.has(token)) {
+        // 允许本机工具（QQFarmCodeHelper）使用固定的服务 Token，避免面板重启后失效
+        const serviceToken = String(process.env.FARM_SERVICE_TOKEN || '').trim();
+        const valid = !!token && (ctx.tokens.has(token) || (!!serviceToken && token === serviceToken));
+        if (!valid) {
             res.status(401).json({ ok: false, error: 'Unauthorized' });
             return;
         }

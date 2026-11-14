@@ -897,7 +897,20 @@ interface PlantingLayout {
     landIds: number[];
 }
 
-function buildPlantingLayouts(availableLandIds: number[], plantSize: number): PlantingLayout[] {
+const LAND_TYPE_PRIORITY: string[] = ['blue-crystal', 'purple-gold', 'gold', 'black', 'red', 'normal'];
+
+function landTypeRank(landType: string): number {
+    const index = LAND_TYPE_PRIORITY.indexOf(landType);
+    return index >= 0 ? index : LAND_TYPE_PRIORITY.length;
+}
+
+/**
+ * 构建种植布局。
+ * 多格作物（size > 1）在提供 landTypeById 时，只返回“四块地同一类型”的布局，
+ * 避免蓝晶/紫金等不同等级土地混在一组里导致高等级土地的加成被低等级拖累。
+ * 同时按土地类型优先级（蓝晶 > 紫金 > 金 > 黑 > 红 > 普通）排序，优先占用高等级同类地。
+ */
+function buildPlantingLayouts(availableLandIds: number[], plantSize: number, landTypeById?: Map<number, string>): PlantingLayout[] {
     const size = Math.max(1, toNum(plantSize) || 1);
     const orderedIds = [...new Set((Array.isArray(availableLandIds) ? availableLandIds : [])
         .map((id: any) => toNum(id))
@@ -910,6 +923,7 @@ function buildPlantingLayouts(availableLandIds: number[], plantSize: number): Pl
     const available = new Set<number>(orderedIds);
     const layouts: PlantingLayout[] = [];
     const seen = new Set<string>();
+    const checkLandType = !!(landTypeById && landTypeById.size > 0);
 
     for (const anchorLandId of orderedIds) {
         const anchor = getLandConfigById(anchorLandId);
@@ -931,10 +945,22 @@ function buildPlantingLayouts(availableLandIds: number[], plantSize: number): Pl
             }
         }
         if (!complete) continue;
+        if (checkLandType) {
+            const types = new Set(footprint.map((id: number) => landTypeById!.get(id)));
+            if (types.size !== 1 || types.has(undefined)) continue;
+        }
         const key = [...footprint].sort((a, b) => a - b).join(',');
         if (seen.has(key)) continue;
         seen.add(key);
         layouts.push({ anchorLandId, landIds: footprint });
+    }
+
+    if (checkLandType) {
+        layouts.sort((a, b) => {
+            const aType = String(landTypeById!.get(a.landIds[0]) || '');
+            const bType = String(landTypeById!.get(b.landIds[0]) || '');
+            return (landTypeRank(aType) - landTypeRank(bType)) || (a.anchorLandId - b.anchorLandId);
+        });
     }
     return layouts;
 }
