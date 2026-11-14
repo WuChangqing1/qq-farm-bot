@@ -41,6 +41,11 @@ Update.log
 .DS_Store
 Thumbs.db
 
+# Local QQ scan-login stack (tokens, QQ session data)
+napcat-docker/.env
+napcat-docker/data/
+service-token.txt
+
 # Test/coverage
 **/test/
 **/tests/

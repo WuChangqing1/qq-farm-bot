@@ -8,6 +8,7 @@ const {
     isAutomationOn,
     getFriendQuietHours,
     getFriendBlacklist,
+    getStealExemptGids,
     getPlantBlacklist,
     getFriendsListCacheTtlSec,
 } = require('../../models/store');
@@ -639,6 +640,9 @@ export async function doFriendOperation(friendGid: any, opType: string, propagat
         let count: number = 0;
 
         if (opType === 'steal') {
+            if (isStealExemptGid(gid, state.accountId)) {
+                return { ok: true, opType, count: 0, message: '该好友在偷菜豁免名单，跳过偷菜' };
+            }
             if (!status.stealable.length) return { ok: true, opType, count: 0, message: '没有可偷取土地' };
             const target: number[] = status.stealable;
             count = await runBatchWithFallback(target, (ids: number[]) => stealHarvest(gid, ids), (ids: number[]) => stealHarvest(gid, ids), propagateErrors);
@@ -754,6 +758,17 @@ export interface VisitFriendOptions {
     ignoreExpLimit?: boolean;
 }
 
+/** 该好友是否在“只跳过偷菜、仍可帮忙/捣乱”的豁免名单里。 */
+function isStealExemptGid(gid: any, accountId?: string): boolean {
+    try {
+        const state = getUserState();
+        const list = getStealExemptGids(accountId || state?.accountId);
+        return (list || []).map(Number).includes(Number(gid));
+    } catch {
+        return false;
+    }
+}
+
 /**
  * 进一次好友农场，把 帮助（除草/除虫/浇水）+ 偷菜 + 捣乱（放草/放虫）一次做完。
  * 三件事都不需要做时连 Enter 都不发——省下的就是以前那一屏 Enter/Leave 超时日志。
@@ -770,7 +785,9 @@ export async function visitFriend(
     const allowBad: boolean = options.allowBad !== false;
     const ignoreExpLimit: boolean = !!options.ignoreExpLimit;
 
-    const stealEnabled: boolean = allowSteal && !!isAutomationOn('friend_steal');
+    const stealEnabled: boolean = allowSteal
+        && !!isAutomationOn('friend_steal')
+        && !isStealExemptGid(gid, accountId);
     const badEnabled: boolean = allowBad && !!isAutomationOn('friend_bad');
     const stopWhenExpLimit: boolean = !!isAutomationOn('friend_help_exp_limit') && !ignoreExpLimit;
     if (!stopWhenExpLimit) schedulerRef().setCanGetHelpExp(true);

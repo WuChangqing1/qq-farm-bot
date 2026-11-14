@@ -79,6 +79,8 @@ export interface AccountConfig {
   friendsListCacheTtlSec: number;
   friendBlacklist: number[];
   ranchFriendBlacklist: number[];
+  /** 只跳过偷菜、但仍然帮忙/捣乱的好友 GID 列表。 */
+  stealExemptGids: number[];
   plantBlacklist: number[];
   stealDelaySeconds: number;
   plantOrderRandom: boolean;

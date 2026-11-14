@@ -427,6 +427,28 @@ function mountFriendRoutes(app: Application, ctx: AdminContext): void {
             return handleApiError(res, e);
         }
     });
+    // 偷菜豁免：这些好友只跳过偷菜，仍会帮忙/捣乱
+    app.get('/api/friend-steal-exempt', (req: Request, res: Response) => {
+        const id = getAccId(ctx, req);
+        if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
+        const gids = store.getStealExemptGids ? store.getStealExemptGids(id) : [];
+        return res.json({ ok: true, data: { gids } });
+    });
+
+    app.post('/api/friend-steal-exempt', (req: Request, res: Response) => {
+        const id = getAccId(ctx, req);
+        if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
+        try {
+            const gids = Array.isArray(req.body?.gids) ? req.body.gids : [];
+            const saved = store.setStealExemptGids ? store.setStealExemptGids(id, gids) : [];
+            if (ctx.provider && typeof ctx.provider.broadcastConfig === 'function') {
+                ctx.provider.broadcastConfig(id);
+            }
+            return res.json({ ok: true, data: { gids: saved } });
+        } catch (e: any) {
+            return handleApiError(res, e);
+        }
+    });
 }
 
 module.exports = { mountFriendRoutes };
