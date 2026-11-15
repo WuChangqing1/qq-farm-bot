@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => {
   const compressedBuild = mode === 'compressed'
 
   return {
+    // 部署到子路径时用 VITE_BASE=/qq-farm/ 构建；默认仍为根路径。
+    base: process.env.VITE_BASE || '/',
     plugins: [
       UnoCSS() as any,
       vue(),
