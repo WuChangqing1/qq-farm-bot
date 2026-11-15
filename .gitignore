@@ -67,3 +67,4 @@ protocol-captures/
 /releases/
 /packages/*/dist/
 .turbo/
+napcat-docker/
