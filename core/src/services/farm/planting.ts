@@ -6,7 +6,7 @@ export {};
 const protobuf = require('protobufjs');
 const { performance } = require('node:perf_hooks');
 const { getPlantNameBySeedId, formatGrowTime, getPlantGrowTime, getAllSeeds, getPlantBySeedId } = require('../../config/gameConfig');
-const { getPreferredSeed, getAutomation, getPlantingStrategy, getBagSeedPriority, getBagSeedMultiLandReservationEnabled, getBagSeedLandTypes, getBagSeedFallbackStrategy, getPlantDelaySeconds } = require('../../models/store');
+const { getPreferredSeed, getAutomation, getPlantingStrategy, getBagSeedPriority, getBagSeedMultiLandReservationEnabled, getBagSeedLandTypes, getBagSeedFallbackStrategy, getPlantDelaySeconds, getPlantBlacklist } = require('../../models/store');
 const { getUserState, getWsErrorState, sendMsgAsync } = require('../../utils/network');
 const { toNum, getServerTimeSec, log, logWarn, sleep } = require('../../utils/utils');
 const { types } = require('../../utils/proto');
@@ -319,8 +319,14 @@ async function plantFromBagSeeds(landsToPlant: any[], landTypeById?: Map<number,
     // 不可种的种子服务端会拒绝，这里记录后继续下一优先种子。
     const skippedSeeds: any[] = [];
     const levelLockedSeeds: any[] = [];
+    const plantBlacklist = new Set((getPlantBlacklist() || []).map((id: any) => toNum(id)));
     const usableSeeds = sortBagSeedsForPlanting(
         filteredForLevelAndCount.filter((seed: any) => {
+            if (plantBlacklist.has(seed.seedId)) {
+                // 牧草等只属于牧场的种子不能种到农场，否则会占满农场空地。
+                skippedSeeds.push({ seedId: seed.seedId, name: seed.name, reason: 'plant_blacklist', count: seed.count });
+                return false;
+            }
             if (seed.count <= 0) {
                 skippedSeeds.push({ seedId: seed.seedId, name: seed.name, reason: 'count_zero', count: seed.count });
                 return false;
