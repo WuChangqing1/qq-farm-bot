@@ -2,7 +2,7 @@ import type { RanchAutomationConfig } from '../../config/ranch-automation';
 export {};
 
 const { RANCH_SWITCH_KEYS } = require('../../config/ranch-automation');
-const { getAutomation } = require('../../models/store');
+const { getAutomation, getStealExemptGids } = require('../../models/store');
 const { inScene, isUnlocked } = require('./transport');
 const { loadRaw, snapshot, inventory, catalog, balance } = require('./state');
 const { cubMap, quantity } = require('./model');
@@ -228,10 +228,17 @@ async function run(options: { farmDeadline?: () => number } = {}): Promise<void>
                         && (!['stroke', 'putMosquito'].includes(action) || times[action] > 0);
                     if (Object.keys(FRIEND_CONTROLS).some(wanted)) {
                         const friends = await require('../friend').getFriendsList();
-                        // 沿用本轮巡查，每轮最多拜访三位，避免长期占用农牧场共用连接。
+                        const exemptGids = new Set((getStealExemptGids() || []).map(Number));
+                        const priorityFriends = friends.filter((row: any) => exemptGids.has(Number(row.gid)));
+                        const otherFriends = friends.filter((row: any) => !exemptGids.has(Number(row.gid)));
+                        // 沿用本轮巡查，每轮最多拜访三位；主号好友优先在第一位拜访（只帮忙、不偷）。
                         for (; friendVisits < Math.min(3, friends.length) && Object.keys(FRIEND_CONTROLS).some(wanted); friendVisits++) {
                             checkpoint();
-                            const friend = friends.find((row: any) => String(row.gid) === pendingFriendGid) || friends[nextFriendIndex % friends.length];
+                            const pending = friends.find((row: any) => String(row.gid) === pendingFriendGid);
+                            const friend = pending
+                                || (friendVisits === 0 && priorityFriends.length
+                                    ? priorityFriends[0]
+                                    : (otherFriends.length ? otherFriends[nextFriendIndex % otherFriends.length] : friends[nextFriendIndex % friends.length]));
                             try {
                                 const result = await interactions.automateFriend(friend.gid, wanted, shouldYield);
                                 Object.assign(times, result.times);

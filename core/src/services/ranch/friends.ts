@@ -8,6 +8,7 @@ const { animalDto } = require('./state');
 const reservations = require('./operation-state');
 const { getAmbientSendContext, runWithSendContext } = require('./context');
 const { logWarn } = require('../../utils/utils');
+const { getStealExemptGids } = require('../../models/store');
 
 function targets(ranches: any[]): any[] {
     const gid = quantity(network.getUserState().gid);
@@ -240,6 +241,8 @@ async function commitSteal(host: string, ranches: any[], plan: any): Promise<any
 // 各动作复用手动入口的检查；农场到期时，完成当前操作并离场，下次刷新后续跑。
 async function automateFriend(hostGid: unknown, enabled: (action: string) => boolean, shouldYield: () => boolean = () => false): Promise<any> {
     return visit(hostGid, async (_entry, ranches, host) => {
+        // 偷菜豁免名单里的好友（例如小号的主号）只帮忙、不偷产物。
+        const stealExempt = (getStealExemptGids() || []).map(Number).includes(Number(host));
         const results: any[] = [];
         const times = enabled('stroke') || enabled('putMosquito') ? await getInteractionTimes() : {};
         const pause = () => results.length > 0 && shouldYield();
@@ -260,7 +263,7 @@ async function automateFriend(hostGid: unknown, enabled: (action: string) => boo
             if (cleaned?.status === 'confirmed') ranches = (await rpc('animals', { host_gid: host })).ranches;
         }
         const stealPlan = quote(host, ranches);
-        if (!stealPlan.skipped) await act('steal', () => commitSteal(host, ranches, stealPlan));
+        if (!stealPlan.skipped && !stealExempt) await act('steal', () => commitSteal(host, ranches, stealPlan));
         for (const ranch of ranches) {
             for (const animal of ranch.animals) {
                 if (!enabled('stroke') || times.stroke <= 0) break;
